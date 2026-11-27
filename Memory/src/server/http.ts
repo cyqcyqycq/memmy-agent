@@ -414,6 +414,7 @@ function createAutoWorkerDrain(
     running = true;
     activeDrain = new Promise<void>((done) => { drainStopped = done; });
     let continueSoon = false;
+    let examinedThroughMs: number | undefined;
     try {
       if (!startupReconciled) {
         startupReconciled = true;
@@ -426,6 +427,8 @@ function createAutoWorkerDrain(
       do {
         requested = false;
         for (let cycle = 0; cycle < maxCycles && !disposed; cycle += 1) {
+          examinedThroughMs = undefined;
+          const startedAt = Date.now();
           const result = await service.runWorkerOnce(workerBatchSize, {
             priorityCohortOnly: true
           }, { continuous: true, signal: admissionAbort.signal, onYieldToPendingRequests: () => {
@@ -435,6 +438,7 @@ function createAutoWorkerDrain(
             requested = true;
           } });
           if (result.leased === 0 && result.embeddingRetries.leased === 0) {
+            examinedThroughMs = startedAt;
             break;
           }
           if (cycle === maxCycles - 1) {
@@ -458,19 +462,21 @@ function createAutoWorkerDrain(
           void drain();
         }, 0);
       } else {
-        scheduleNextDueJob();
+        scheduleNextDueJob(examinedThroughMs);
       }
     }
   }
 
-  function scheduleNextDueJob(): void {
+  /** `examinedThroughMs` is the start of a drain that found nothing to lease. Rows due by then
+   * may still be waiting on a dependency; waking for them again would start a drain every millisecond. */
+  function scheduleNextDueJob(examinedThroughMs?: number): void {
     if (disposed) {
       return;
     }
     if (delayedTimer) {
       return;
     }
-    const delayMs = nextWorkerRunAfterDelayMs(service);
+    const delayMs = nextWorkerRunAfterDelayMs(service, examinedThroughMs);
     // Recheck even with no known due job: a legacy writer or another process
     // may leave an orphan after the worker has already become idle.
     const wakeAfterMs = Math.min(delayMs ?? options.idlePollMs, options.idlePollMs);
@@ -581,9 +587,9 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function nextWorkerRunAfterDelayMs(service: MemoryService): number | undefined {
+function nextWorkerRunAfterDelayMs(service: MemoryService, examinedThroughMs?: number): number | undefined {
   const now = Date.now();
-  const runAt = service.nextWorkerRunAt();
+  const runAt = service.nextWorkerRunAt(examinedThroughMs);
   return runAt === undefined ? undefined : Math.max(1, runAt - now);
 }
 

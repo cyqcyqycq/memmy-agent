@@ -230,7 +230,9 @@ export class WorkerRunner {
     this.unsubscribeConcurrency = this.concurrency.subscribe(() => this.notifyWorkAvailable());
   }
 
-  nextWorkerRunAt(): number | undefined {
+  /** With `futureAfterMs`, queue deadlines at or before that instant are ignored: a caller
+   * that has already examined those rows waits for a later deadline, not one in the past. */
+  nextWorkerRunAt(futureAfterMs?: number): number | undefined {
     if (!this.deps.memoryAddEnabled()) {
       return undefined;
     }
@@ -242,15 +244,14 @@ export class WorkerRunner {
         .filter((jobType) => !heldSummaryJobs?.includes(jobType));
       const allowedAt = this.deps.repos.runtime.nextWorkerRunAt({
         jobTypes: allowed,
-        includeEmbeddingRetries: !this.deps.memoryBudgetJobConsumes("embedding")
+        includeEmbeddingRetries: !this.deps.memoryBudgetJobConsumes("embedding"),
+        futureAfterMs
       });
       const midnight = this.deps.memoryBudgetNextWakeAtMs();
       const times = [allowedAt, midnight, reconcileAt].filter((time): time is number => Number.isFinite(time));
       return times.length > 0 ? Math.min(...times) : undefined;
     }
-    const scheduled = this.deps.repos.runtime.nextWorkerRunAt(
-      heldSummaryJobs ? { excludedJobTypes: heldSummaryJobs } : undefined
-    );
+    const scheduled = this.deps.repos.runtime.nextWorkerRunAt({ excludedJobTypes: heldSummaryJobs, futureAfterMs });
     const times = [scheduled, reconcileAt].filter((time): time is number => Number.isFinite(time));
     return times.length > 0 ? Math.min(...times) : undefined;
   }

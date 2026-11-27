@@ -3535,8 +3535,8 @@ export class MemoryService {
     return this.importJobs.enqueuePendingImportSummaries(limit, targetMemoryIds);
   }
 
-  nextWorkerRunAt(): number | undefined {
-    const workerAt = this.workerRunner.nextWorkerRunAt();
+  nextWorkerRunAt(futureAfterMs?: number): number | undefined {
+    const workerAt = this.workerRunner.nextWorkerRunAt(futureAfterMs);
     const upgradeAt = this.config.algorithm.enableMemoryAdd && !this.shouldDeferBudgetedEmbedding()
       ? this.embeddingMaintenance().nextUpgradeAttemptAt() : undefined;
     const times = [workerAt, upgradeAt].filter((time): time is number => Number.isFinite(time));
